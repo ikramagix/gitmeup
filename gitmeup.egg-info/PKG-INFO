@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: gitmeup
+Version: 0.1.0
+Summary: LLM-assisted Conventional Commits generator for git repositories
+Requires-Python: >=3.10
+Requires-Dist: openai>=1.0.0

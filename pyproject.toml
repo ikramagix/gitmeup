@@ -1,0 +1,16 @@
+[project]
+name = "gitmeup"
+version = "0.1.0"
+description = "LLM-assisted Conventional Commits generator for git repositories"
+readme = ""
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0.0",
+]
+
+[project.scripts]
+gitmeup = "gitmeup.cli:main"
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"

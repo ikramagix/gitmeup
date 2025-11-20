@@ -1,0 +1,9 @@
+pyproject.toml
+gitmeup/__init__.py
+gitmeup/cli.py
+gitmeup.egg-info/PKG-INFO
+gitmeup.egg-info/SOURCES.txt
+gitmeup.egg-info/dependency_links.txt
+gitmeup.egg-info/entry_points.txt
+gitmeup.egg-info/requires.txt
+gitmeup.egg-info/top_level.txt
