@@ -49,7 +49,7 @@ export GEMINI_API_KEY="your-key"
 
 You also need a model with:
 
-GITMEUP_MODEL="mymodel
+GITMEUP_MODEL="themodel"
 
 ## Usage
 
