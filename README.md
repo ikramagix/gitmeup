@@ -1,49 +1,60 @@
 # gitmeup
 
-`gitmeup` looks at your current `git diff` / `git status` and turns that messy working tree into small, focused, Conventional Commit–style `git add` / `git commit` commands, with safe quoting for awkward paths. It does **not** push anything, it just helps you decide *what* to commit and *how* to phrase it.
+`gitmeup` leverages popular LLMs to organize changes into atomic, semantic batches, and generates precise `git add` and `git commit` commands following the [Conventional Commits 1.0.0](https://www.conventionalcommits.org/) specification.
 
----
+> [!IMPORTANT]
+> It does **not** push anything, it just helps you decide *what* to commit and *how* to phrase it.
+> It is designed for strict safety: it runs in **dry-run mode by default**, never pushes to remotes, and handles complex file paths with POSIX-compliant quoting.
+
+### Navigation
+* [What problem does it solve?](#what-problem-does-it-solve)
+* [How does it work?](#how-it-works-in-practice)
+* [Installation](#installation)
+* [Configuration](#configuration)
+* [Usage](#usage)
+* [Examples](#examples)
+* [Behaviour](#behaviour)
+* [License](#license)
+* [Maintainer](#maintainer)
 
 ## What problem does it solve?
 
-Typical flow when you have a pile of changes:
+The typical workflow for complex changes involves significant manual overhead:
 
-- You stare at `git status` and `git diff` deciding how to split changes.
-- You manually type `git add` commands, hoping you did not miss a file.
-- You spend too long crafting a commit message that fits Conventional Commits.
-- You worry about weird file paths breaking your shell.
+- Manually reviewing `git status` and `git diff` to determine logical split points.
+- Crafting specific `git add` commands, risking missing files or including unrelated changes.
+- Spending time formatting commit messages to adhere to Conventional Commits standards.
+- Handling files with spaces, brackets, or special characters that require careful shell escaping.
 
-`gitmeup` automates that boring part:
+`gitmeup` automates the staging and committing process:
 
-- Groups changes into **atomic, semantically focused commits** (refactor, docs, assets, etc.).
-- Proposes ready-to-paste `git add` / `git commit -m "type(scope): message"` sequences.
-- Handles **strict path quoting** so file names with spaces, brackets, unicode, etc. do not explode your shell.
-- Runs in **dry-run** by default, so nothing happens until you opt in.
-
----
+- Groups changes into **atomic, semantically focused commits** (e.g., separating `feat` from `refactor` or `docs`).
+- Generates precise `git add` sequences followed by `git commit -m "type(scope): description"`.
+- Enforces **strict path quoting** to prevent shell expansion errors with complex filenames.
+- Operates safely via a default **dry-run** mode, requiring explicit confirmation to execute.
 
 ## How it works (in practice)
 
-From inside a git repo, `gitmeup` collects:
+From inside a git repository, `gitmeup` aggregates the following context:
 
-- `git diff --stat`
+- `git diff --stat HEAD`
 - `git status --short`
-- `git diff` with noisy formats excluded from the body:
-  - `*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.svg`, `*.webp`
+- `git diff HEAD` with high-noise/low-value files excluded from the context body:
+  - Images: `*.png`, `*.jpg`, `*.svg`, etc.
+  - Lockfiles: `package-lock.json`, `yarn.lock`, `Cargo.lock`, etc. (to prevent token exhaustion).
+  - Minified assets and map files.
 
-This context is sent to a Gemini model, which returns a single `bash` code block with:
+This sanitized context is transmitted to an LLM model _(default: Gemini)_, which returns a single code block containing:
 
-- Batches of `git add` / `git rm` / `git mv`
-- Followed by matching `git commit -m "…"`, using Conventional Commits
+- Batches of `git add`, `git rm`, or `git mv` commands.
+- Corresponding `git commit -m "..."` commands following the Conventional Commits specification.
 
 You can then:
 
-- Inspect the proposed commands (default), or
-- Let `gitmeup` run them with `--apply`.
+- Inspect the proposed command plan (default behavior).
+- Execute the plan using `--apply`.
 
-No `git push` is ever generated.
-
----
+No `git push` or remote operations are ever generated.
 
 ## Installation
 
@@ -51,14 +62,14 @@ No `git push` is ever generated.
 
 ```bash
 pip install gitmeup
-````
+```
 
 This installs the `gitmeup` CLI into your environment.
 
 ### From source (editable dev install)
 
 ```bash
-git clone https://github.com/ikramagix/gitmeup
+git clone [https://github.com/ikramagix/gitmeup](https://github.com/ikramagix/gitmeup)
 cd gitmeup
 
 python3 -m venv .venv
@@ -68,11 +79,9 @@ pip install --upgrade pip
 pip install -e .
 ```
 
----
-
 ## Configuration
 
-`gitmeup` talks to Google Gemini via `google-genai`. It needs:
+`gitmeup` interacts with Google Gemini via `google-genai`. It needs:
 
 * A Gemini API key
 * A model name (default is `gemini-2.0-flash-lite` unless overridden)
@@ -120,26 +129,25 @@ The CLI accepts overrides:
 
 ```bash
 gitmeup --model gemini-2.0-pro        # override model for this run only
-gitmeup --api-key "your-key-here"     # override key (not recommended; leaks to history!)
+gitmeup --api-key "you-can-but-should-not-add-your-key-here"     # override key (not recommended; leaks to history!)
 ```
 
-For security, prefer `~/.gitmeup.env` or environment variables over `--api-key`.
-
----
+> [!WARNING]
+> For security, prefer `~/.gitmeup.env` or environment variables over `--api-key`.
 
 ## Usage
 
-From any git repository with uncommitted changes:
+Run the tool from the root of any git repository with uncommitted changes:
 
 ```bash
 gitmeup
 ```
 
-This:
+The tool performs the following checks:
 
-* Ensures you are inside a git repo.
-* Checks `git status --porcelain`.
-* If there are changes, sends context to the model and prints **proposed commands**.
+* Verifies the current directory is a git repository.
+* Checks `git status --porcelain` for changes.
+* If changes exist, generates and displays **proposed commands**.
 
 ### Dry run (default)
 
@@ -152,17 +160,17 @@ Example output:
 ```bash
 Proposed commands:
 
-git add -- gitmeup/stuff.py README.md
-git commit -m 'docs: Update README with export for GITMEUP_MODEL'
+git add -- gitmeup/utils.py README.md
+git commit -m 'docs: update README with configuration details'
 
 Dry run: not executing commands. Re-run with --apply to execute.
 ```
 
-Nothing is executed until you explicitly ask.
+No commands are executed in this mode.
 
 ### Apply mode
 
-To actually run the proposed `git add` and `git commit` commands:
+To execute the proposed `git add` and `git commit` commands:
 
 ```bash
 gitmeup --apply
@@ -170,41 +178,41 @@ gitmeup --apply
 
 `gitmeup` will:
 
-* Print each command as it executes.
-* Stop on the first failure and exit with a non-zero status.
-* Finally show a concise status:
+* Print each command to stdout as it executes.
+* Terminate immediately upon any command failure (non-zero exit code).
+* Display the final git status upon completion:
 
 ```bash
 Final git status:
 
 ## main...origin/main
- M some/file
-?? other/file
+ M src/api_client.py
+?? tests/new_test.py
 
 Review your history with:
   git log --oneline --graph --decorate -n 10
 ```
 
----
-
 ## Examples
 
-Basic flow, with everything configured via env / `.env`:
+Standard workflow using environment configuration:
 
 ```bash
-# inside a repo with changes
-gitmeup          # review suggested batches
-gitmeup --apply  # once you are happy with the plan
+# Review suggested batches
+gitmeup
+
+# Execute the plan
+gitmeup --apply
+
+# Verify history
 git log --oneline --graph --decorate -n 10
 ```
 
-Override model just for this run:
+Override the model for a specific run:
 
 ```bash
 gitmeup --model gemini-2.0-flash-lite
 ```
-
----
 
 ## Behaviour
 
@@ -215,13 +223,16 @@ gitmeup --model gemini-2.0-flash-lite
 
 You still review and decide when to run `--apply`.
 
----
-
 ## License
 
-MIT License. See [`LICENSE`](./LICENSE) for details.
+This project is distributed under a **dual license** model.
 
----
+1.  **Individuals & personal use**: Free to use under the terms of the **MIT License**.
+2.  **Organizations & businesses**: A commercial license is required.
+
+Please contact **hello@ikramagix.com** for commercial licensing details.
+
+See [`LICENSE`](./LICENSE) for the full legal text.
 
 ## Maintainer
 
