@@ -9,6 +9,9 @@ from pathlib import Path
 from google import genai
 from dotenv import load_dotenv
 
+# CONSTANT: Hard limit for diff size to prevent token exhaustion (429 errors).
+# ~4 characters per token. 40,000 chars is roughly 10k tokens, leaving plenty of room.
+MAX_DIFF_CHARS = 40000
 
 SYSTEM_PROMPT = dedent(
     """
@@ -24,7 +27,7 @@ Suggest splitting changes into multiple commits when appropriate, and reflect th
 You receive:
 - A `git diff --stat` output
 - A `git status` output
-- A `git diff` output where binary/image formats may have been excluded from the diff body
+- A `git diff` output (note: binary files and large lockfiles are excluded)
 
 RULES FOR DECIDING COMMITS:
 - Keep each commit atomic and semantically focused (feature, refactor, docs, locales, tests, CI, assets, etc.).
@@ -55,7 +58,7 @@ OUTPUT FORMAT (VERY IMPORTANT):
 - You may separate batches with a single blank line between them.
 
 STYLE OF COMMIT MESSAGES:
-- Descriptions are short, imperative, and specific.
+- Descriptions are detailed, imperative, and specific.
 """
 )
 
@@ -101,24 +104,54 @@ def ensure_repo():
 
 
 def collect_context():
-    diff_stat = run_git(["diff", "--stat"], check=False)
+    # Use HEAD to capture both staged and unstaged changes in the diff
+    diff_stat = run_git(["diff", "--stat", "HEAD"], check=False)
     status = run_git(["status", "--short"], check=False)
+
+    # Exclude patterns that bloat tokens but provide low semantic value
     diff_args = [
         "diff",
+        "HEAD",
         "--",
         ".",
+        # Images / Binaries
         ":(exclude)*.png",
         ":(exclude)*.jpg",
         ":(exclude)*.jpeg",
         ":(exclude)*.gif",
         ":(exclude)*.svg",
         ":(exclude)*.webp",
+        ":(exclude)*.ico",
+        # Lockfiles (Lead to fast token exhaustion)
+        ":(exclude)package-lock.json",
+        ":(exclude)yarn.lock",
+        ":(exclude)pnpm-lock.yaml",
+        ":(exclude)bun.lockb",
+        ":(exclude)poetry.lock",
+        ":(exclude)Gemfile.lock",
+        ":(exclude)go.sum",
+        ":(exclude)Cargo.lock",
+        ":(exclude)*.lock",
+        # Minified / Generated code
+        ":(exclude)*.min.js",
+        ":(exclude)*.min.css",
+        ":(exclude)*.map",
+        ":(exclude)dist/*",
+        ":(exclude)build/*",
+        ":(exclude).next/*",
     ]
     diff = run_git(diff_args, check=False)
     return diff_stat, status, diff
 
 
 def build_user_prompt(diff_stat, status, diff):
+    # Truncate diff if it's still too massive
+    if len(diff) > MAX_DIFF_CHARS:
+        diff = (
+            diff[:MAX_DIFF_CHARS]
+            + "\n\n... [DIFF TRUNCATED BY GITMEUP TO SAVE TOKENS] ..."
+        )
+
     parts = [
         "# git diff --stat",
         diff_stat.strip() or "(no diff stat)",
@@ -126,11 +159,12 @@ def build_user_prompt(diff_stat, status, diff):
         "# git status --short",
         status.strip() or "(no status)",
         "",
-        "# git diff (images/binaries may be excluded)",
+        "# git diff (lockfiles & binaries excluded)",
         diff.strip() or "(no textual diff)",
         "",
         "# TASK",
         "Based on the changes above, propose git add/rm/mv and git commit commands as per the instructions.",
+        "If the diff was truncated, rely on the file paths in the stat section to infer context.",
     ]
     return "\n".join(parts)
 
@@ -213,8 +247,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "--model",
-        default=os.environ.get("GITMEUP_MODEL", "gemini-2.0-flash-001"),
-        help="Gemini model name (default: gemini-2.0-flash-001 or $GITMEUP_MODEL).",
+        default=os.environ.get("GITMEUP_MODEL", "gemini-2.0-flash-lite"),
+        help="Gemini model name (default: gemini-2.0-flash-lite or $GITMEUP_MODEL).",
     )
     parser.add_argument(
         "--apply",
@@ -245,6 +279,10 @@ def main(argv=None):
 
     diff_stat, status, diff = collect_context()
     prompt = build_user_prompt(diff_stat, status, diff)
+
+    # Calculate rough token usage for user awareness (optional, but helpful for debugging)
+    # print(f"DEBUG: Prompt size is approx {len(prompt)} characters.")
+
     raw_output = call_llm(args.model, args.api_key, prompt)
 
     bash_block = extract_bash_block(raw_output)
